@@ -6,13 +6,39 @@
 
 Press a volume-key shortcut anywhere: the screen freezes, a scan sweeps across it, and QR Lens zooms straight into the code and shows you what's inside.
 
-<img src="preview.gif" alt="QR Lens finding a QR code on a café menu, zooming into it and showing the link with an Open button" width="300">
+<img src="docs/app.gif" alt="QR Lens finding a QR code on a café menu, zooming into it and showing the link with an Open button" width="300">
 
 [**⬇ Download the latest APK**](https://github.com/CoolNinja2009/QRLens/releases/latest/download/QR-Lens.apk) · [All releases](https://github.com/CoolNinja2009/QRLens/releases)
 
 Android 11+ · works offline · no internet permission · free and open source
 
 </div>
+
+---
+
+## See it
+
+<table>
+<tr>
+<td align="center" width="33%">
+<img src="docs/classic.gif" width="220"><br>
+<b>Classic sweep</b><br>
+<sub>A scan line sweeps the frozen screen</sub>
+</td>
+<td align="center" width="33%">
+<img src="docs/ripple.gif" width="220"><br>
+<b>Ripple</b><br>
+<sub>A 3D particle water-wave from the centre</sub>
+</td>
+<td align="center" width="33%">
+<img src="docs/flag.gif" width="220"><br>
+<b>Link safety warnings</b><br>
+<sub>Risky links & payments are flagged before you open them</sub>
+</td>
+</tr>
+</table>
+
+<sub>Pick your scan animation in Settings → Animation. Warnings run fully on-device.</sub>
 
 ---
 
