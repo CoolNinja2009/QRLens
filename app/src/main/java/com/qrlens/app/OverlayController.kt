@@ -79,6 +79,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
 
         val r = OverlayRoot(ctx) { back() }
         val sv = ScanView(ctx)
+        sv.animStyle = Prefs.animation(ctx)
         sv.listener = this
         r.addView(sv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
@@ -121,6 +122,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         if (id != session || root == null) return
         val items = hits.map { Found(it.rect, QrParser.parse(it.text)) }
             .sortedByDescending { it.rect.width() * it.rect.height() }
+        for (f in items) try { HistoryStore.add(ctx, f.content) } catch (_: Throwable) {}
         // Let the scan animation breathe for a moment so the transition never feels abrupt.
         val wait = max(0L, MIN_SCAN_MS - (SystemClock.uptimeMillis() - t0))
         main.postDelayed({
@@ -261,7 +263,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         val t = c.title.let { if (it.length > 18) it.take(17) + "\u2026" else it }
         val base = if (t.isBlank() || t == c.label) c.label else "${c.label}  \u00B7  $t"
         // Mark flagged codes in the multi-code overview so risky ones stand out before you tap.
-        val mark = when (SafetyCheck.check(c).risk) {
+        val mark = when (if (Prefs.flagging(ctx)) SafetyCheck.check(c).risk else Risk.NONE) {
             Risk.DANGER -> "\u26A0 "
             Risk.CAUTION -> "\u26A1 "
             Risk.NONE -> ""
@@ -389,7 +391,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         val r = root ?: return
         val sv = scan ?: return
 
-        val safety = SafetyCheck.check(c)
+        val safety = if (Prefs.flagging(ctx)) SafetyCheck.check(c) else Safety(Risk.NONE, emptyList())
 
         val cardView = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL

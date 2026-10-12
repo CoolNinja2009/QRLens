@@ -42,6 +42,9 @@ Someone sends you a QR code on WhatsApp. A payment QR is on a website. A Wi‑Fi
 - **Copy and Share** buttons for anything it finds.
 - **Finds tricky codes too:** dark-mode (inverted), rotated, tiny or huge codes.
 - **Link safety warnings (offline).** Flags look-alike domains, @-tricks, raw IPs, insecure login pages, shortened links and brand-impersonation, and always cautions on payment (UPI) codes. Risky codes need a second tap to open. All checks run on-device.
+- **Scan history.** Every code you scan is saved on-device (last 100). Reopen, copy or share any of them, or clear the list. Never leaves your phone.
+- **Generate QR codes.** Make a QR from any text or link, then share or save it. Share text to QR Lens to turn it into a code.
+- **Make it yours.** Choose your scan animation (classic sweep or ripple), a trigger chime or silence, and toggle the link warnings — all in Settings.
 - **Private by design.** Everything happens on your phone. QR Lens has no internet permission, so nothing it sees can leave your device.
 
 ## Install

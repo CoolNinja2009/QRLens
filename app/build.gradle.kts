@@ -6,7 +6,7 @@ plugins {
 // ---- App version: the ONLY place to change it ----------------------------------
 // MAJOR.MINOR.PATCH  ->  bugfix: 1.3.0 -> 1.3.1 · new feature: 1.3.1 -> 1.4.0 · big change: 2.0.0
 // GitHub Actions reads this line to name the release (v1.3.1).
-val appVersion = "1.4.0"
+val appVersion = "1.5.2"
 // versionCode is derived (1.3.0 -> 10300) so it always goes up when the version does.
 val appVersionCode = appVersion.split(".").map { it.toInt() }.let { (ma, mi, pa) -> ma * 10000 + mi * 100 + pa }
 

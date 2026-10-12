@@ -45,6 +45,7 @@ class ShareProvider : ContentProvider() {
             "vcf" -> "text/x-vcard"
             "ics" -> "text/calendar"
             "txt" -> "text/plain"
+            "png" -> "image/png"
             else -> "application/octet-stream"
         }
     }

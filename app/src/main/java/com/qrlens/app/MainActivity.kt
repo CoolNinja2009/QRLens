@@ -76,99 +76,30 @@ class MainActivity : Activity() {
         status.addView(statusButton)
         col.addView(status, cardLp(28))
 
-        // Trigger picker
-        val trig = card()
-        trig.addView(text("Shortcut", 16f, Color.WHITE, bold = true))
-        trig.addView(text("How you open the scanner. The Power button can't be used: Android keeps it for itself.", 13f, Theme.TEXT_2)
-            .apply { setPadding(0, (4 * dp).toInt(), 0, (6 * dp).toInt()) })
-        val group = RadioGroup(this)
-        val current = Prefs.triggerId(this)
-        for ((i, t) in Trigger.values().withIndex()) {
-            val rb = RadioButton(this).apply {
-                id = 1000 + i
-                text = t.title
-                textSize = 15f
-                setTextColor(Color.WHITE)
-                buttonTintList = ColorStateList.valueOf(Theme.ACCENT_A)
-                setPadding((6 * dp).toInt(), (10 * dp).toInt(), 0, (10 * dp).toInt())
-                isChecked = t.id == current
-            }
-            group.addView(rb)
-        }
-        val trigHint = text(Trigger.byId(current).hint, 13f, Theme.ACCENT_A).apply {
-            setPadding(0, (6 * dp).toInt(), 0, 0)
-        }
-        group.setOnCheckedChangeListener { _, checkedId ->
-            val t = Trigger.values().getOrNull(checkedId - 1000) ?: return@setOnCheckedChangeListener
-            Prefs.setTriggerId(this, t.id)
-            trigHint.text = t.hint
-            refreshTexts()
-        }
-        trig.addView(group)
-        trig.addView(trigHint)
-        col.addView(trig, cardLp(14))
+        // Two modes + settings
+        col.addView(Ui.navRow(this, "▦", "History", "Codes you've scanned, saved on this phone") {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }, cardLp(18))
+        col.addView(Ui.navRow(this, "＋", "Generate", "Make a QR code from text or a link") {
+            startActivity(Intent(this, GenerateActivity::class.java))
+        }, cardLp(12))
+        col.addView(Ui.navRow(this, "⚙", "Settings", "Shortcut, animation, sound, security") {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }, cardLp(12))
 
         // Setup steps
         val steps = card()
         steps.addView(text("Setup (one time)", 16f, Color.WHITE, bold = true))
         steps.addView(text(
-            "1.  Tap Turn on, open \"Installed apps\" (or \"Downloaded apps\"), choose QR Lens and switch it on.\n\n" +
-                "2.  If Android says the setting is restricted (Android 13+ for apps installed from an APK): open App info below, tap the ⋮ menu in the top-right, choose \"Allow restricted settings\", then repeat step 1.\n\n" +
-                "3.  Done. Use your shortcut (below) on any screen.",
+            "1.  Tap Turn on, choose QR Lens under Installed/Downloaded apps and switch it on.\n\n" +
+                "2.  If Android says the setting is restricted (Android 13+ for apps from an APK): open App info, tap the ⋮ menu, choose \"Allow restricted settings\", then repeat step 1.\n\n" +
+                "3.  Done. Use your shortcut on any screen.",
             14f, Theme.TEXT_2
         ).apply { setPadding(0, (10 * dp).toInt(), 0, (14 * dp).toInt()) })
         steps.addView(button("Open App info", primary = false) {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        col.addView(steps, cardLp(14))
-
-        // Options
-        val opts = card()
-        @Suppress("DEPRECATION")
-        val sw = Switch(this).apply {
-            text = "Hold back volume while counting presses"
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            isChecked = Prefs.holdBackVolume(this@MainActivity)
-            setOnCheckedChangeListener { _, checked -> Prefs.setHoldBackVolume(this@MainActivity, checked) }
-        }
-        opts.addView(sw)
-        opts.addView(text(
-            "On: the triple press won't change your volume. Single presses still work, with a tiny delay.\nOff: volume changes instantly, and also goes up while you trigger a scan.",
-            13f, Theme.TEXT_2
-        ).apply { setPadding(0, (8 * dp).toInt(), 0, 0) })
-        col.addView(opts, cardLp(14))
-
-        // Banking apps
-        val bank = card()
-        bank.addView(text("BHIM & banking apps", 16f, Color.WHITE, bold = true))
-        bank.addView(text(
-            "BHIM and some bank apps refuse to open while an accessibility app from outside the Play Store is on. " +
-                "QR Lens switches itself off when they open.\n\n" +
-                "Turn it back on in one move: hold BOTH volume keys for 3 seconds.\n\n" +
-                "Set that up once: tap the button below → turn on \"QR Lens shortcut\" → choose \"Hold volume keys\". " +
-                "You can also add the QR Lens tile to Quick Settings.",
-            14f, Theme.TEXT_2
-        ).apply { setPadding(0, (10 * dp).toInt(), 0, (12 * dp).toInt()) })
-        @Suppress("DEPRECATION")
-        val ap = Switch(this).apply {
-            text = "Auto-pause in BHIM & bank apps"
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            isChecked = Prefs.autoPause(this@MainActivity)
-            setOnCheckedChangeListener { _, checked -> Prefs.setAutoPause(this@MainActivity, checked) }
-        }
-        bank.addView(ap)
-        bank.addView(button("Set up volume-keys shortcut", primary = false) {
-            try {
-                startActivity(Setup.serviceSwitchIntent(this))
-            } catch (e: Exception) {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = (12 * dp).toInt()
-        })
-        col.addView(bank, cardLp(14))
+        col.addView(steps, cardLp(18))
 
         col.addView(text(
             "Links open in your browser. Anything else (text, contacts, events, Wi-Fi) opens in your phone's own viewer. Everything is processed on-device.",

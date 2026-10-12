@@ -21,6 +21,7 @@ import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
@@ -77,6 +78,9 @@ class ScanView(context: Context) : View(context) {
     var inOverview = false
         private set
 
+    /** "classic" sweep line, or "ripple" rings from the center. Set before start(). */
+    var animStyle: String = "classic"
+
     private val anims = ArrayList<Animator>()
     private val byKey = HashMap<String, Animator>()
     private var camAnim: Animator? = null
@@ -92,6 +96,7 @@ class ScanView(context: Context) : View(context) {
     private val blurPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val bracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -428,9 +433,11 @@ class ScanView(context: Context) : View(context) {
         canvas.clipPath(pagePath)
         canvas.drawBitmap(bmp, camMatrix, bmpPaint)
 
-        if (scanDim > 0f) canvas.drawColor(Color.argb((scanDim * 0.22f * 255).toInt(), 0, 0, 0))
+        // Dim the frozen screen so the scan stands out; the ripple darkens it further to glow.
+        val dimAmount = if (animStyle == "ripple") 0.52f else 0.22f
+        if (scanDim > 0f) canvas.drawColor(Color.argb((scanDim * dimAmount * 255).toInt(), 2, 4, 10))
 
-        if (sweepAlpha > 0.01f) drawSweep(canvas)
+        if (sweepAlpha > 0.01f) { if (animStyle == "ripple") drawRipple(canvas) else drawSweep(canvas) }
 
         val h = hole
         if (focus > 0.001f && h != null) {
@@ -569,6 +576,86 @@ class ScanView(context: Context) : View(context) {
         canvas.restore()
     }
 
+    /**
+     * A field of particles rippling outward from the center, like a stone dropped in water:
+     * each particle is displaced along its radius by the wave height, so crests bunch into
+     * bright moving rings while troughs thin out. Pure math, ~1000 dots, one FILL paint.
+     */
+    private fun drawRipple(canvas: Canvas) {
+        canvas.save()
+        canvas.concat(camMatrix)
+        ripplePaint.style = Paint.Style.FILL
+        val cx = bw / 2f
+        val cy = bh / 2f
+        val maxR = hypot(bw.toDouble(), bh.toDouble()).toFloat() / 2f
+        val sp = bw / 22f                 // grid spacing (bitmap px)
+        val k = 5.0f                      // wave bands across the radius
+        val amp = sp * 0.82f              // max radial displacement
+        val twoPi = (Math.PI * 2).toFloat()
+        var y = sp * 0.5f
+        while (y < bh) {
+            var x = sp * 0.5f
+            while (x < bw) {
+                val dx = x - cx
+                val dy = y - cy
+                val d = hypot(dx.toDouble(), dy.toDouble()).toFloat() + 0.001f
+                val nd = (d / maxR).coerceAtMost(1.2f)
+                val env = (1f - nd * 0.82f) * minOf(1f, nd * 6f)
+                if (env > 0.01f) {
+                    val raw = kotlin.math.sin((nd * k - sweep) * twoPi)
+                    val crest = max(0f, raw)
+                    val bright = crest * crest * env
+                    val disp = raw * env * amp
+                    val ux = dx / d
+                    val uy = dy / d
+                    val px = x + ux * disp
+                    val py = y + uy * disp
+                    val rad = sp * (0.06f + bright * 0.2f)
+                    val col = lerpColor(Theme.ACCENT_A, Theme.ACCENT_B, (0.05f + nd * 0.85f).coerceIn(0f, 1f))
+                    // glow halo on bright (crest) particles -> luminous rings
+                    if (bright > 0.1f) {
+                        ripplePaint.color = col
+                        ripplePaint.alpha = (sweepAlpha * bright * 0.16f * 255f).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(px, py, rad * 3.2f, ripplePaint)
+                        ripplePaint.alpha = (sweepAlpha * bright * 0.30f * 255f).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(px, py, rad * 1.8f, ripplePaint)
+                    }
+                    // the particle itself
+                    ripplePaint.color = col
+                    ripplePaint.alpha = (sweepAlpha * (0.14f + bright * 0.86f) * 255f).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(px, py, rad, ripplePaint)
+                    // white-hot core on the brightest crest particles
+                    if (bright > 0.5f) {
+                        ripplePaint.color = CORE
+                        ripplePaint.alpha = (sweepAlpha * 230f).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(px, py, rad * 0.55f, ripplePaint)
+                    }
+                }
+                x += sp
+            }
+            y += sp
+        }
+        // the glowing "drop" at the center
+        ripplePaint.color = Theme.ACCENT_A
+        ripplePaint.alpha = (sweepAlpha * (0.18f + 0.12f * pulse) * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, sp * (0.9f + 0.2f * pulse), ripplePaint)
+        ripplePaint.color = CORE
+        ripplePaint.alpha = (sweepAlpha * 240f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, sp * (0.16f + 0.05f * pulse), ripplePaint)
+        canvas.restore()
+    }
+
+    private val CORE = Color.rgb(0xEA, 0xFB, 0xFF)
+
+    private fun lerpColor(a: Int, b: Int, t: Float): Int {
+        val ar = (a ushr 16) and 0xFF; val ag = (a ushr 8) and 0xFF; val ab = a and 0xFF
+        val br = (b ushr 16) and 0xFF; val bg = (b ushr 8) and 0xFF; val bb = b and 0xFF
+        val r = (ar + (br - ar) * t).toInt()
+        val g = (ag + (bg - ag) * t).toInt()
+        val bl = (ab + (bb - ab) * t).toInt()
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
+    }
+
     private fun drawGlow(canvas: Canvas) {
         val h = hole ?: return
         mapRect(paddedHole(h), holeView)
@@ -666,6 +753,11 @@ object Motion {
 object Theme {
     val ACCENT_A = Color.rgb(0x6E, 0xE7, 0xF9)   // cyan
     val ACCENT_B = Color.rgb(0xA7, 0x8B, 0xFA)   // violet
+    val BG = Color.rgb(0x0A, 0x0B, 0x12)
+    val CARD_BG = Color.rgb(0x15, 0x16, 0x20)
+    val DANGER = Color.rgb(0xF8, 0x71, 0x71)
+    val CAUTION = Color.rgb(0xFB, 0xBF, 0x24)
+    val OK = Color.rgb(0x4A, 0xDE, 0x80)
     val CARD = Color.argb(0xEB, 0x16, 0x17, 0x1F)
     val CARD_STROKE = Color.argb(0x26, 0xFF, 0xFF, 0xFF)
     val TEXT = Color.WHITE

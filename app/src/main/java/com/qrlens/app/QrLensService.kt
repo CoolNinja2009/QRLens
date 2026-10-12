@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioAttributes
+import android.media.SoundPool
 import android.os.SystemClock
 import android.graphics.Bitmap
 import android.os.Handler
@@ -36,6 +38,10 @@ class QrLensService : AccessibilityService() {
     }
     private val engine by lazy { TriggerEngine(this, handler) { trigger() } }
 
+    private var soundPool: SoundPool? = null
+    private var chimeId = 0
+    private var chimeReady = false
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -44,6 +50,7 @@ class QrLensService : AccessibilityService() {
             registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
         } catch (_: Exception) {
         }
+        loadSound()
         QrLensTile.refresh(this)
     }
 
@@ -54,6 +61,8 @@ class QrLensService : AccessibilityService() {
         }
         overlay?.removeNow()
         overlay = null
+        try { soundPool?.release() } catch (_: Exception) {}
+        soundPool = null
         if (instance === this) instance = null
         QrLensTile.refresh(this)
         super.onDestroy()
@@ -109,6 +118,7 @@ class QrLensService : AccessibilityService() {
         capturing = true
         captureStarted = SystemClock.uptimeMillis()
         engine.reset()
+        playChime()
         haptic(VibrationEffect.EFFECT_HEAVY_CLICK)
         capture(retry = true)
     }
@@ -147,6 +157,32 @@ class QrLensService : AccessibilityService() {
                 toast("Screenshot blocked (code $errorCode)")
             }
         })
+    }
+
+    private fun loadSound() {
+        if (soundPool != null) return
+        try {
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            val sp = SoundPool.Builder().setMaxStreams(2).setAudioAttributes(attrs).build()
+            sp.setOnLoadCompleteListener { _, id, status -> if (id == chimeId && status == 0) chimeReady = true }
+            chimeId = sp.load(this, R.raw.scan_chime, 1)
+            soundPool = sp
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** Plays the trigger chime unless the user chose "no sound". Never blocks the scan. */
+    private fun playChime() {
+        if (Prefs.sound(this) == "none") return
+        val sp = soundPool ?: return
+        if (!chimeReady) return
+        try {
+            sp.play(chimeId, 0.6f, 0.6f, 1, 0, 1f)
+        } catch (_: Throwable) {
+        }
     }
 
     fun haptic(effect: Int) {
@@ -204,4 +240,23 @@ object Prefs {
     fun setHoldBackVolume(ctx: Context, value: Boolean) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_HOLD_BACK, value).apply()
     }
+
+    private const val KEY_ANIM = "animation"      // "classic" | "ripple"
+    private const val KEY_SOUND = "sound"         // "default" | "none"
+    private const val KEY_FLAGGING = "flagging"   // link/payment safety warnings on/off
+
+    fun animation(ctx: Context): String =
+        p(ctx).getString(KEY_ANIM, "classic") ?: "classic"
+
+    fun setAnimation(ctx: Context, value: String) = p(ctx).edit().putString(KEY_ANIM, value).apply()
+
+    fun sound(ctx: Context): String = p(ctx).getString(KEY_SOUND, "default") ?: "default"
+
+    fun setSound(ctx: Context, value: String) = p(ctx).edit().putString(KEY_SOUND, value).apply()
+
+    fun flagging(ctx: Context): Boolean = p(ctx).getBoolean(KEY_FLAGGING, true)
+
+    fun setFlagging(ctx: Context, value: Boolean) = p(ctx).edit().putBoolean(KEY_FLAGGING, value).apply()
+
+    private fun p(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 }
