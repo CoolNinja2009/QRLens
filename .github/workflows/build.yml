@@ -2,7 +2,17 @@ name: Build APK
 
 on:
   push:
-  workflow_dispatch:
+    # Only build when something that affects the APK changes.
+    # README, preview.gif, .gitignore etc. don't trigger a build.
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:   # "Run workflow" button for manual builds
 
 permissions:
   contents: write
