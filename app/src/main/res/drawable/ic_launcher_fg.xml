@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- corner brackets -->
+    <path
+        android:pathData="M34,46 L34,38 Q34,34 38,34 L46,34 M62,34 L70,34 Q74,34 74,38 L74,46 M74,62 L74,70 Q74,74 70,74 L62,74 M46,74 L38,74 Q34,74 34,70 L34,62"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- mini QR -->
+    <path android:fillColor="#FF7DE8F7" android:pathData="M42,42h9v9h-9z M57,42h9v9h-9z M42,57h9v9h-9z" />
+    <path android:fillColor="#FFB49BFF" android:pathData="M57,57h4v4h-4z M62,62h4v4h-4z M62,57h4v4h-4z" />
+</vector>

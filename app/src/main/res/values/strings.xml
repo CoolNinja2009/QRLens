@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QR Lens</string>
+    <string name="a11y_description">Press Volume Up three times anywhere to scan the screen for QR codes. QR Lens only listens for the volume key and takes a screenshot when you trigger it. Nothing leaves your phone.</string>
+</resources>

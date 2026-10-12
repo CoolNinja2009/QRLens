@@ -1,0 +1,18 @@
+# Build output
+build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+
+# Local machine / IDE
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# Signing key: never commit it (CI gets it from the KEYSTORE_BASE64 secret)
+*.keystore
+*.jks
+*.p12
+*.b64.txt
