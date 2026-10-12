@@ -259,7 +259,14 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
 
     private fun chipLabel(c: QrContent): String {
         val t = c.title.let { if (it.length > 18) it.take(17) + "\u2026" else it }
-        return if (t.isBlank() || t == c.label) c.label else "${c.label}  \u00B7  $t"
+        val base = if (t.isBlank() || t == c.label) c.label else "${c.label}  \u00B7  $t"
+        // Mark flagged codes in the multi-code overview so risky ones stand out before you tap.
+        val mark = when (SafetyCheck.check(c).risk) {
+            Risk.DANGER -> "\u26A0 "
+            Risk.CAUTION -> "\u26A1 "
+            Risk.NONE -> ""
+        }
+        return mark + base
     }
 
     private fun showTopPill(msg: String) {
@@ -382,6 +389,8 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         val r = root ?: return
         val sv = scan ?: return
 
+        val safety = SafetyCheck.check(c)
+
         val cardView = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -392,6 +401,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         }
 
         val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        if (safety.risk != Risk.NONE) texts.addView(safetyBanner(safety))
         val label = TextView(ctx).apply {
             text = c.label
             setTextColor(Theme.ACCENT_A)
@@ -440,6 +450,21 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
                 b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 wifiFill = fill
             }
+        } else if (safety.risk == Risk.DANGER) {
+            // Two-tap confirm: first tap arms, second proceeds. Never fully blocks.
+            var armed = false
+            lateinit var btn: TextView
+            btn = pillButton("Open", primary = true) {
+                if (!armed) {
+                    armed = true
+                    btn.text = "Open anyway?"
+                    svc.haptic(VibrationEffect.EFFECT_DOUBLE_CLICK)
+                    main.postDelayed({ if (card != null) { armed = false; btn.text = "Open" } }, 3500)
+                } else {
+                    primary(c)
+                }
+            }
+            btn
         } else {
             pillButton("Open", primary = true) { primary(c) }
         }
@@ -483,6 +508,43 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             .start()
 
         wifiFill?.let { startAutoConnect(open, it, c) }
+    }
+
+    /** Colored safety strip shown at the top of the result card. */
+    @SuppressLint("SetTextI18n")
+    private fun safetyBanner(safety: Safety): View {
+        val danger = safety.risk == Risk.DANGER
+        val color = if (danger) 0xFFF87171.toInt() else 0xFFFBBF24.toInt()
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = GradientDrawable().apply {
+                cornerRadius = 12f * dp
+                setColor((color and 0x00FFFFFF) or 0x24000000)   // ~14% tint of the risk color
+            }
+            val h = (10 * dp).toInt()
+            val v = (7 * dp).toInt()
+            setPadding(h, v, h, v)
+        }
+        val dot = TextView(ctx).apply {
+            text = if (danger) "⚠" else "⚡"   // warning / caution glyph
+            setTextColor(color)
+            textSize = 13f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        val msg = TextView(ctx).apply {
+            text = safety.top ?: if (danger) "This looks risky." else "Be careful."
+            setTextColor(Theme.TEXT)
+            textSize = 12f
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding((7 * dp).toInt(), 0, 0, 0)
+        }
+        row.addView(dot)
+        row.addView(msg)
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = (8 * dp).toInt()
+        row.layoutParams = lp
+        return row
     }
 
     private fun showBar(c: QrContent) {

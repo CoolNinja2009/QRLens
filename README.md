@@ -41,6 +41,7 @@ Someone sends you a QR code on WhatsApp. A payment QR is on a website. A Wi‑Fi
 
 - **Copy and Share** buttons for anything it finds.
 - **Finds tricky codes too:** dark-mode (inverted), rotated, tiny or huge codes.
+- **Link safety warnings (offline).** Flags look-alike domains, @-tricks, raw IPs, insecure login pages, shortened links and brand-impersonation, and always cautions on payment (UPI) codes. Risky codes need a second tap to open. All checks run on-device.
 - **Private by design.** Everything happens on your phone. QR Lens has no internet permission, so nothing it sees can leave your device.
 
 ## Install
