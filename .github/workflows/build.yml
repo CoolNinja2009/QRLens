@@ -22,6 +22,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags, for release notes and the version check
+
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(sed -nE 's/^val appVersion = "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' app/build.gradle.kts)
+          if [ -z "$VERSION" ]; then
+            echo "::error file=app/build.gradle.kts::Couldn't find a line like: val appVersion = \"1.2.3\""
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::v$VERSION is already released. The APK is built for testing (see Artifacts) but no release is published. Bump appVersion in app/build.gradle.kts to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Building QR Lens v$VERSION"
 
       - uses: actions/setup-java@v4
         with:
@@ -53,13 +73,19 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QR-Lens-apk
+          name: QR-Lens-v${{ steps.version.outputs.version }}
           path: QR-Lens.apk
 
-      - name: Publish as a release (easy phone download)
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: QR Lens build ${{ github.run_number }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: QR Lens ${{ steps.version.outputs.tag }}
           files: QR-Lens.apk
           make_latest: true
+          generate_release_notes: true
+          body: |
+            **Download:** `QR-Lens.apk` below (Android 11+). Installs as an update over any earlier QR Lens.
+
+            Play Protect may block the install of sideloaded accessibility apps: pause *Scan apps with Play Protect* in the Play Store while installing, then turn it back on. See the [README](https://github.com/${{ github.repository }}#install) for setup.

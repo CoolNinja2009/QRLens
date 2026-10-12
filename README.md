@@ -120,7 +120,7 @@ Without the release keystore, builds are signed with your local debug key, so th
 
 The release keystore is not in the repo (`.gitignore` blocks it). GitHub Actions recreates it from the `KEYSTORE_BASE64` repository secret (optional `KEYSTORE_PASSWORD`). Never commit the keystore or post its base64 text: anyone with it can sign apps that install as updates to QR Lens.
 
-For each release, bump `versionCode` and `versionName` in `app/build.gradle.kts`.
+**Releasing:** change `appVersion` at the top of `app/build.gradle.kts` (bugfix `1.3.0 → 1.3.1`, feature `→ 1.4.0`, big change `→ 2.0.0`) and push. Actions builds it and publishes release `v1.3.1` with the APK and auto-generated notes. Pushing code without bumping the version builds a test APK (under the run's Artifacts) but doesn't publish a release.
 
 </details>
 
