@@ -55,6 +55,14 @@ class TriggerEngine(private val ctx: Context, private val handler: Handler, priv
         fire()
     }
 
+    /** Forget pending presses / held keys (called when the scanner opens). */
+    fun reset() {
+        handler.removeCallbacks(flush)
+        handler.removeCallbacks(longPress)
+        pending.clear()
+        held.clear()
+    }
+
     fun onKey(e: KeyEvent): Boolean {
         val key = e.keyCode
         if (key != KeyEvent.KEYCODE_VOLUME_UP && key != KeyEvent.KEYCODE_VOLUME_DOWN) return false

@@ -185,19 +185,35 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        val on = isServiceEnabled()
-        (statusDot.background as GradientDrawable).setColor(if (on) Color.rgb(0x4A, 0xDE, 0x80) else Color.rgb(0xF8, 0x71, 0x71))
-        statusText.text = if (on) "Ready: ${Trigger.byId(Prefs.triggerId(this)).short}" else "Service is off"
+        val running = QrLensService.instance != null
+        val enabled = isServiceEnabled()
+        val color = when {
+            running -> Color.rgb(0x4A, 0xDE, 0x80)
+            enabled -> Color.rgb(0xFB, 0xBF, 0x24)
+            else -> Color.rgb(0xF8, 0x71, 0x71)
+        }
+        (statusDot.background as GradientDrawable).setColor(color)
+        statusText.text = when {
+            running -> "Ready: ${Trigger.byId(Prefs.triggerId(this)).short}"
+            // Switched on in Settings, but Android isn't running it (e.g. after a crash).
+            enabled -> "Stopped. Turn it off and on"
+            else -> "Service is off"
+        }
         refreshTexts()
-        statusButton.text = if (on) "Pause" else "Turn on"
+        statusButton.text = when {
+            running -> "Pause"
+            enabled -> "Fix"
+            else -> "Turn on"
+        }
     }
 
     private fun refreshTexts() {
         val t = Trigger.byId(Prefs.triggerId(this))
         intro.text = "${t.title}, anywhere. QR Lens freezes the screen, finds every QR code and zooms right in."
-        if (isServiceEnabled()) statusText.text = "Ready: ${t.short}"
+        if (QrLensService.instance != null) statusText.text = "Ready: ${t.short}"
     }
 
+    /** Switched on in Accessibility settings (not necessarily running). */
     private fun isServiceEnabled(): Boolean {
         if (QrLensService.instance != null) return true
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)

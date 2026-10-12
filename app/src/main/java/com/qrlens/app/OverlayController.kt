@@ -58,6 +58,10 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
     private var index = 0
     private var ready = false
     private var closing = false
+    private var closingSince = 0L
+    private var shownAt = 0L
+    /** Separate handler so removeNow() / animation cancels can't clear the close failsafe. */
+    private val watchdog = Handler(Looper.getMainLooper())
     private var autoAnim: ValueAnimator? = null
 
     val isShowing: Boolean get() = root != null
@@ -100,6 +104,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         }
         root = r
         scan = sv
+        shownAt = SystemClock.uptimeMillis()
 
         // Blur is tiny (screenshot / 14) so this costs a few ms.
         val blurred = Blur.make(bmp)
@@ -136,16 +141,40 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             return
         }
         closing = true
+        closingSince = SystemClock.uptimeMillis()
+        ready = false
+        picking = false
         autoAnim?.cancel()
         hideFloating(if (fast) 90 else 160)
-        sv.exit(fast) {
-            removeNow()
-            after?.invoke()
+        val mySession = session
+        var finished = false
+        val finish = {
+            if (!finished) {
+                finished = true
+                watchdog.removeCallbacksAndMessages(null)
+                if (session == mySession) removeNow()
+                after?.invoke()
+            }
         }
+        sv.exit(fast) { finish() }
+        // Failsafe: if the exit animation is ever interrupted, close anyway.
+        watchdog.postDelayed({ finish() }, (if (fast) 200L else 380L) + 700L)
+    }
+
+    /**
+     * True if the overlay claims to be open but is really dead (closing for too long or no
+     * longer attached). The key handler uses this to self-heal instead of passing keys through.
+     */
+    fun isStuck(): Boolean {
+        val r = root ?: return false
+        if (!r.isAttachedToWindow && SystemClock.uptimeMillis() - shownAt > 1500) return true
+        return closing && SystemClock.uptimeMillis() - closingSince > 1500
     }
 
     fun removeNow() {
         session++
+        watchdog.removeCallbacksAndMessages(null)
+        ready = false
         autoAnim?.cancel()
         autoAnim = null
         main.removeCallbacksAndMessages(null)
@@ -189,6 +218,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
     /** Two or more codes: show them all and let the user pick. */
     private fun overview() {
         val sv = scan ?: return
+        if (closing) return
         ready = false
         picking = false
         hideCard()
@@ -211,7 +241,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         hideTopPill()
         removeBar()
         svc.haptic(VibrationEffect.EFFECT_TICK)
-        val f = found[index]
+        val f = found.getOrNull(index) ?: return
         sv.focusFromOverview(index) {
             if (!closing && root != null) {
                 ready = true
@@ -223,6 +253,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
 
     /** Back key / tap outside: from a zoomed code go back to the overview, otherwise close. */
     fun back() {
+        if (closing || scan == null) return
         if (found.size > 1 && ready && scan?.inOverview == false) overview() else dismiss()
     }
 
@@ -301,10 +332,11 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
     }
 
     override fun onHoleTap() {
-        if (ready) primary(found.getOrNull(index)?.content ?: return)
+        if (ready && !closing) primary(found.getOrNull(index)?.content ?: return)
     }
 
     override fun onBackgroundTap() {
+        if (closing) return
         if (picking || ready || found.isEmpty()) back()
     }
 
@@ -476,7 +508,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             add(pillButton("Details") { autoAnim?.cancel(); dismiss(fast = true) { QrActions.openAsFile(svc, c) } })
         }
         if (found.size > 1) {
-            add(pillButton("All ${found.size}") { autoAnim?.cancel(); overview() })
+            add(pillButton("All ${found.size}") { if (!closing) { autoAnim?.cancel(); overview() } })
         }
         add(pillButton("Done") { dismiss() })
 

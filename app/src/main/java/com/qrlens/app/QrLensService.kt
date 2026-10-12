@@ -1,7 +1,11 @@
 package com.qrlens.app
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
@@ -22,16 +26,32 @@ class QrLensService : AccessibilityService() {
     private var overlay: OverlayController? = null
 
     private var capturing = false
+    private var captureStarted = 0L
+
+    /** Screen turned off mid-scan: close the overlay so it never lingers over the lock screen. */
+    private val screenOff = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            overlay?.removeNow()
+        }
+    }
     private val engine by lazy { TriggerEngine(this, handler) { trigger() } }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         overlay = OverlayController(this)
+        try {
+            registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        } catch (_: Exception) {
+        }
         QrLensTile.refresh(this)
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(screenOff)
+        } catch (_: Exception) {
+        }
         overlay?.removeNow()
         overlay = null
         if (instance === this) instance = null
@@ -60,21 +80,35 @@ class QrLensService : AccessibilityService() {
     }
     override fun onInterrupt() {}
 
-    override fun onKeyEvent(event: KeyEvent): Boolean {
+    override fun onKeyEvent(event: KeyEvent): Boolean = try {
+        handleKey(event)
+    } catch (t: Throwable) {
+        // Never let a bug here crash the service (a crashed service stays "on" but stops working).
+        overlay?.removeNow()
+        false
+    }
+
+    private fun handleKey(event: KeyEvent): Boolean {
         val ov = overlay
+        if (ov != null && ov.isShowing && ov.isStuck()) ov.removeNow()   // self-heal
         if (ov != null && ov.isShowing) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK) {
                 if (event.action == KeyEvent.ACTION_UP) ov.back()
                 return true
             }
+            // Let the engine see key releases so its state stays in sync (e.g. the 3rd press's UP).
+            if (event.action == KeyEvent.ACTION_UP) return engine.onKey(event)
             return false
         }
         return engine.onKey(event)
     }
 
     fun trigger() {
+        if (capturing && SystemClock.uptimeMillis() - captureStarted > 3000) capturing = false
         if (capturing || overlay?.isShowing == true) return
         capturing = true
+        captureStarted = SystemClock.uptimeMillis()
+        engine.reset()
         haptic(VibrationEffect.EFFECT_HEAVY_CLICK)
         capture(retry = true)
     }
@@ -96,7 +130,12 @@ class QrLensService : AccessibilityService() {
                     toast("Couldn't capture the screen")
                     return
                 }
-                overlay?.show(bmp)
+                try {
+                    overlay?.show(bmp)
+                } catch (t: Throwable) {
+                    overlay?.removeNow()
+                    toast("QR Lens hit an error, try again")
+                }
             }
 
             override fun onFailure(errorCode: Int) {
@@ -122,8 +161,6 @@ class QrLensService : AccessibilityService() {
     }
 
     companion object {
-        private const val PRESS_WINDOW_MS = 450L
-
         /** Apps known to block while a sideloaded accessibility service is enabled. */
         val PAUSE_FOR = setOf(
             "in.org.npci.upiapp",            // BHIM

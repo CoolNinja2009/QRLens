@@ -16,8 +16,8 @@ android {
         applicationId = "com.qrlens.app"
         minSdk = 30          // Android 11+ (needed for accessibility screenshots)
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     signingConfigs {
