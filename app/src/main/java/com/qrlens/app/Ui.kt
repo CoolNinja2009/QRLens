@@ -23,8 +23,7 @@ object Ui {
         text = s
         textSize = size
         setTextColor(color)
-        typeface = if (bold) Typeface.create("sans-serif-medium", Typeface.BOLD)
-        else Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = if (bold) Fonts.bold(ctx) else Fonts.regular(ctx)
         setLineSpacing(0f, 1.18f)
     }
 
@@ -52,7 +51,7 @@ object Ui {
         return TextView(ctx).apply {
             text = label
             textSize = 14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = Fonts.bold(ctx)
             setTextColor(if (primary) Color.rgb(0x0B, 0x0C, 0x14) else Color.WHITE)
             gravity = Gravity.CENTER
             val h = (18 * d).toInt()
@@ -78,6 +77,7 @@ object Ui {
             text = label
             setTextColor(Color.WHITE)
             textSize = 15f
+            typeface = Fonts.regular(ctx)
             isChecked = checked
             setOnCheckedChangeListener { _, v -> onChange(v) }
         }
@@ -88,15 +88,25 @@ object Ui {
         val d = dp(act)
         act.window.statusBarColor = Theme.BG
         act.window.navigationBarColor = Theme.BG
+        val side = (22 * d).toInt()
+        val baseTop = (16 * d).toInt()
+        val baseBottom = (40 * d).toInt()
         val col = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            val p = (22 * d).toInt()
-            setPadding(p, (48 * d).toInt(), p, (40 * d).toInt())
+            setPadding(side, baseTop, side, baseBottom)
         }
         val scroll = ScrollView(act).apply {
             setBackgroundColor(Theme.BG)
             isFillViewport = true
+            clipToPadding = false
             addView(col)
+        }
+        // Push content below the status bar (and above the gesture bar) using the real insets,
+        // so the title never slides under the notification bar on devices with a tall status area.
+        scroll.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
+            col.setPadding(side, baseTop + bars.top, side, baseBottom + bars.bottom)
+            insets
         }
         return Pair(scroll, col)
     }

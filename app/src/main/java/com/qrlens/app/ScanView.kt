@@ -71,6 +71,11 @@ class ScanView(context: Context) : View(context) {
     private var pulse = 0f
     private var hole: RectF? = null
 
+    // Codes already found while the scan animation is still playing: shown as faint outlines.
+    private var pendingRects: List<RectF> = emptyList()
+    private var pendingAlpha = 0f
+    private var introAt = 0L
+
     // Overview of several codes
     private var overview = 0f
     private var holes: List<RectF> = emptyList()
@@ -108,7 +113,7 @@ class ScanView(context: Context) : View(context) {
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val chipText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 12f * resources.displayMetrics.scaledDensity
-        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
+        typeface = Fonts.bold(context)
         letterSpacing = 0.06f
     }
     private val multiPath = Path()
@@ -184,6 +189,8 @@ class ScanView(context: Context) : View(context) {
 
     private fun startIntro() {
         cam = identityCam()
+        radarT0 = System.nanoTime()
+        introAt = android.os.SystemClock.uptimeMillis()
         anim(0f, 1f, 220, Motion.STANDARD, key = "bgAlpha") { bgAlpha = it }
         anim(0f, 1f, 420, Motion.EMPHASIZED_DECEL, key = "corner") { corner = it }
         anim(0.55f, 0f, 380, Motion.STANDARD) { flash = it }
@@ -193,8 +200,8 @@ class ScanView(context: Context) : View(context) {
         animateCam(introCam(), bw / 2f, bh / 2f, 460, Motion.EMPHASIZED_DECEL, null)
 
         sweepAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1150
-            startDelay = 60
+            duration = SWEEP_MS
+            startDelay = SWEEP_DELAY
             repeatCount = ValueAnimator.INFINITE
             interpolator = PathInterpolator(0.45f, 0f, 0.4f, 1f)
             addUpdateListener { sweep = it.animatedValue as Float; invalidate() }
@@ -214,9 +221,38 @@ class ScanView(context: Context) : View(context) {
         }
     }
 
+    /** Codes were found but the scan animation keeps playing: mark each one with a faint outline. */
+    fun markFound(rects: List<RectF>) {
+        pendingRects = rects.map { RectF(it) }
+        anim(pendingAlpha, 1f, 380, Motion.EMPHASIZED_DECEL, key = "pending") { pendingAlpha = it }
+    }
+
+    private fun clearFound() {
+        if (pendingRects.isEmpty()) return
+        anim(pendingAlpha, 0f, 300, Motion.STANDARD, key = "pending") { pendingAlpha = it }
+    }
+
+    /**
+     * Milliseconds until the scan animation completes a full cycle (at least one whole pass since it
+     * started, ending on a cycle boundary), so we never cut a wave or a sweep off halfway.
+     */
+    fun msToFinishCycle(): Long {
+        val el = android.os.SystemClock.uptimeMillis() - introAt
+        val period: Long
+        val offset: Long
+        when (animStyle) {
+            "radar" -> { period = (radarPeriod * 1000).toLong(); offset = 0L }
+            else -> { period = SWEEP_MS; offset = SWEEP_DELAY }
+        }
+        val target = max(el, offset + period)
+        val cycles = (target - offset + period - 1) / period
+        return (offset + cycles * period - el).coerceAtLeast(0L)
+    }
+
     /** Lock the brackets onto [r] (bitmap coords) and zoom into it. */
     fun focusOn(r: RectF, onDone: () -> Unit) {
         hole = RectF(r)
+        clearFound()
         anim(sweepAlpha, 0f, 260, Motion.STANDARD, key = "sweepAlpha") { sweepAlpha = it }
         anim(scanDim, 0f, 300, Motion.STANDARD, key = "scanDim") { scanDim = it }
         anim(0f, 1f, 520, Motion.EMPHASIZED_DECEL, key = "bracket") { bracket = it }
@@ -229,6 +265,7 @@ class ScanView(context: Context) : View(context) {
         holes = rects.map { RectF(it) }
         labels = chipLabels
         inOverview = true
+        clearFound()
         anim(sweepAlpha, 0f, 260, Motion.STANDARD, key = "sweepAlpha") { sweepAlpha = it }
         anim(scanDim, 0f, 300, Motion.STANDARD, key = "scanDim") { scanDim = it }
         anim(bracketAlpha, 0f, 260, Motion.STANDARD, key = "bracketAlpha") { bracketAlpha = it }
@@ -434,10 +471,17 @@ class ScanView(context: Context) : View(context) {
         canvas.drawBitmap(bmp, camMatrix, bmpPaint)
 
         // Dim the frozen screen so the scan stands out; the ripple darkens it further to glow.
-        val dimAmount = if (animStyle == "ripple") 0.52f else 0.22f
+        val dimAmount = when (animStyle) { "ripple" -> 0.52f; "radar" -> 0.55f; else -> 0.22f }
         if (scanDim > 0f) canvas.drawColor(Color.argb((scanDim * dimAmount * 255).toInt(), 2, 4, 10))
 
-        if (sweepAlpha > 0.01f) { if (animStyle == "ripple") drawRipple(canvas) else drawSweep(canvas) }
+        if (sweepAlpha > 0.01f) {
+            when (animStyle) {
+                "ripple" -> drawRipple(canvas)
+                "radar" -> drawRadar(canvas)
+                else -> drawSweep(canvas)
+            }
+        }
+        if (pendingAlpha > 0.01f && pendingRects.isNotEmpty()) drawPending(canvas)
 
         val h = hole
         if (focus > 0.001f && h != null) {
@@ -577,9 +621,11 @@ class ScanView(context: Context) : View(context) {
     }
 
     /**
-     * A field of particles rippling outward from the center, like a stone dropped in water:
-     * each particle is displaced along its radius by the wave height, so crests bunch into
-     * bright moving rings while troughs thin out. Pure math, ~1000 dots, one FILL paint.
+     * A stone-drop ripple on a field of particles. A single wave *packet* expands from the center:
+     * the leading crest (right at the wavefront) is the tallest, and each trailing ring behind it
+     * is smaller — real water loses energy outward, so the first wave dominates. Particles not yet
+     * reached sit still as a calm, dark water surface; the packet rides over them and lifts them as
+     * it passes. Pure math, ~1000 dots, one FILL paint.
      */
     private fun drawRipple(canvas: Canvas) {
         canvas.save()
@@ -588,10 +634,13 @@ class ScanView(context: Context) : View(context) {
         val cx = bw / 2f
         val cy = bh / 2f
         val maxR = hypot(bw.toDouble(), bh.toDouble()).toFloat() / 2f
-        val sp = bw / 22f                 // grid spacing (bitmap px)
-        val k = 5.0f                      // wave bands across the radius
-        val amp = sp * 0.82f              // max radial displacement
+        val sp = bw / 28f                 // grid spacing (bitmap px) — finer water
+        val amp = sp * 1.6f               // max radial displacement
         val twoPi = (Math.PI * 2).toFloat()
+        val front = sweep * 1.30f         // expanding wavefront position, in normalized-radius units
+        val waveK = 3.0f                  // number of rings in the trailing packet
+        val trailDecay = 1.9f             // how fast trailing rings shrink (bigger -> first wave dominates more)
+        val life = 1f - smooth(0.95f, 1.30f, front)   // fade the packet out as it leaves the screen, for a clean loop
         var y = sp * 0.5f
         while (y < bh) {
             var x = sp * 0.5f
@@ -599,50 +648,200 @@ class ScanView(context: Context) : View(context) {
                 val dx = x - cx
                 val dy = y - cy
                 val d = hypot(dx.toDouble(), dy.toDouble()).toFloat() + 0.001f
-                val nd = (d / maxR).coerceAtMost(1.2f)
-                val env = (1f - nd * 0.82f) * minOf(1f, nd * 6f)
-                if (env > 0.01f) {
-                    val raw = kotlin.math.sin((nd * k - sweep) * twoPi)
-                    val crest = max(0f, raw)
-                    val bright = crest * crest * env
-                    val disp = raw * env * amp
-                    val ux = dx / d
-                    val uy = dy / d
-                    val px = x + ux * disp
-                    val py = y + uy * disp
-                    val rad = sp * (0.06f + bright * 0.2f)
-                    val col = lerpColor(Theme.ACCENT_A, Theme.ACCENT_B, (0.05f + nd * 0.85f).coerceIn(0f, 1f))
-                    // glow halo on bright (crest) particles -> luminous rings
-                    if (bright > 0.1f) {
+                val nd = d / maxR
+                val rel = front - nd      // how far behind the wavefront this particle is (>0 = already reached)
+                var drawn = false
+                if (rel > 0f && rel < 1.6f) {
+                    val trail = exp(-rel.toDouble() * trailDecay).toFloat()  // 1 at the front, decaying inward
+                    val lead = smooth(0f, 0.04f, rel)                        // soften the very leading edge
+                    val osc = kotlin.math.cos((rel * waveK * twoPi).toDouble()).toFloat()  // crest sits exactly at the front
+                    val distFade = (1f - nd * 0.30f).coerceIn(0f, 1f)
+                    val height = osc * trail * lead * life * distFade
+                    if (abs(height) > 0.03f) {
+                        val crest = max(0f, height)
+                        val bright = min(1f, Math.pow(crest.toDouble(), 1.2).toFloat() * 1.25f)
+                        val disp = height * amp
+                        val ux = dx / d
+                        val uy = dy / d
+                        val px = x + ux * disp
+                        val py = y + uy * disp
+                        val rad = sp * (0.07f + bright * 0.30f)
+                        val col = lerpColor(Theme.ACCENT_A, Theme.ACCENT_B, (0.05f + nd * 0.85f).coerceIn(0f, 1f))
+                        if (bright > 0.06f) {
+                            ripplePaint.color = col
+                            ripplePaint.alpha = (sweepAlpha * bright * 0.14f * 255f).toInt().coerceIn(0, 255)
+                            canvas.drawCircle(px, py, rad * 3.4f, ripplePaint)
+                            ripplePaint.alpha = (sweepAlpha * bright * 0.30f * 255f).toInt().coerceIn(0, 255)
+                            canvas.drawCircle(px, py, rad * 1.9f, ripplePaint)
+                        }
                         ripplePaint.color = col
-                        ripplePaint.alpha = (sweepAlpha * bright * 0.16f * 255f).toInt().coerceIn(0, 255)
-                        canvas.drawCircle(px, py, rad * 3.2f, ripplePaint)
-                        ripplePaint.alpha = (sweepAlpha * bright * 0.30f * 255f).toInt().coerceIn(0, 255)
-                        canvas.drawCircle(px, py, rad * 1.8f, ripplePaint)
+                        ripplePaint.alpha = (sweepAlpha * (0.10f + bright * 0.90f) * 255f).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(px, py, rad, ripplePaint)
+                        if (bright > 0.45f) {
+                            ripplePaint.color = CORE
+                            ripplePaint.alpha = (sweepAlpha * 235f * min(1f, (bright - 0.45f) * 3f)).toInt().coerceIn(0, 255)
+                            canvas.drawCircle(px, py, rad * 0.55f, ripplePaint)
+                        }
+                        drawn = true
                     }
-                    // the particle itself
-                    ripplePaint.color = col
-                    ripplePaint.alpha = (sweepAlpha * (0.14f + bright * 0.86f) * 255f).toInt().coerceIn(0, 255)
-                    canvas.drawCircle(px, py, rad, ripplePaint)
-                    // white-hot core on the brightest crest particles
-                    if (bright > 0.5f) {
-                        ripplePaint.color = CORE
-                        ripplePaint.alpha = (sweepAlpha * 230f).toInt().coerceIn(0, 255)
-                        canvas.drawCircle(px, py, rad * 0.55f, ripplePaint)
-                    }
+                }
+                if (!drawn) {
+                    // calm water: a dim resting dot so the surface reads even before the wave arrives
+                    ripplePaint.color = lerpColor(Theme.ACCENT_A, Theme.ACCENT_B, nd.coerceIn(0f, 1f))
+                    ripplePaint.alpha = (sweepAlpha * 0.09f * 255f).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(x, y, sp * 0.07f, ripplePaint)
                 }
                 x += sp
             }
             y += sp
         }
-        // the glowing "drop" at the center
+        // the drop splash at the center — a bright flash at the instant the wave is born
+        val birth = 1f - smooth(0f, 0.22f, front)
         ripplePaint.color = Theme.ACCENT_A
-        ripplePaint.alpha = (sweepAlpha * (0.18f + 0.12f * pulse) * 255f).toInt().coerceIn(0, 255)
-        canvas.drawCircle(cx, cy, sp * (0.9f + 0.2f * pulse), ripplePaint)
+        ripplePaint.alpha = (sweepAlpha * (0.10f + 0.34f * birth + 0.10f * pulse) * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, sp * (0.9f + 1.6f * birth), ripplePaint)
         ripplePaint.color = CORE
-        ripplePaint.alpha = (sweepAlpha * 240f).toInt().coerceIn(0, 255)
-        canvas.drawCircle(cx, cy, sp * (0.16f + 0.05f * pulse), ripplePaint)
+        ripplePaint.alpha = (sweepAlpha * (0.45f + 0.55f * birth) * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, sp * (0.18f + 0.36f * birth), ripplePaint)
         canvas.restore()
+    }
+
+    /** Smoothstep (Hermite) from 0 at [e0] to 1 at [e1]. */
+    private fun smooth(e0: Float, e1: Float, x: Float): Float {
+        val t = ((x - e0) / (e1 - e0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
+    // nd (fraction of max radius), angle (radians) for the radar's "detections"
+    private val radarBlips = floatArrayOf(
+        0.60f, 0.80f,
+        0.42f, 2.75f,
+        0.80f, 4.05f,
+        0.33f, 5.30f,
+        0.68f, 3.55f,
+        0.52f, 1.70f,
+        0.25f, 0.30f,
+        0.74f, 5.90f
+    )
+    private var radarT0 = 0L
+    private val radarOval = RectF()
+    private val radarPeriod = 2.4f   // seconds per full rotation (calm, deliberate)
+
+    /**
+     * A sonar/radar sweep: a beam rotating from the center at a steady pace over faint range rings,
+     * leaving a phosphor trail behind it, with "detections" that flash as the beam passes and then
+     * fade — exactly the metaphor of a scanner searching the frozen screen for a code.
+     */
+    private fun drawRadar(canvas: Canvas) {
+        canvas.save()
+        canvas.concat(camMatrix)
+        val cx = bw / 2f
+        val cy = bh / 2f
+        val maxR = hypot(bw.toDouble(), bh.toDouble()).toFloat() / 2f
+        val a = sweepAlpha
+        val twoPi = (Math.PI * 2).toFloat()
+        if (radarT0 == 0L) radarT0 = System.nanoTime()
+        val t = ((System.nanoTime() - radarT0) / 1_000_000_000.0).toFloat()
+        val ang = (t / radarPeriod) * twoPi % twoPi      // steady linear rotation, independent of easing
+        val angDeg = Math.toDegrees(ang.toDouble()).toFloat()
+        val px1 = dp / cam.s                             // 1dp in bitmap space
+        val p = ripplePaint
+
+        // phosphor wedge: nested pie slices that all end at the beam, so overlap builds a smooth
+        // falloff (bright at the beam, fading ~80° behind it) with no seams. Violet first, cyan on top.
+        p.style = Paint.Style.FILL
+        radarOval.set(cx - maxR, cy - maxR, cx + maxR, cy + maxR)
+        val n = 40
+        for (k in n downTo 1) {
+            val ext = 80f * k / n
+            p.color = lerpColor(Theme.ACCENT_A, Theme.ACCENT_B, k.toFloat() / n)
+            p.alpha = (a * 0.013f * 255f).toInt().coerceIn(0, 255)
+            canvas.drawArc(radarOval, angDeg - ext, ext, true, p)
+        }
+
+        // range rings + crosshair (the scope grid)
+        p.style = Paint.Style.STROKE
+        p.color = Theme.ACCENT_A
+        p.strokeWidth = px1
+        p.alpha = (a * 0.12f * 255f).toInt().coerceIn(0, 255)
+        for (ring in 1..3) canvas.drawCircle(cx, cy, maxR * ring / 4f, p)
+        p.alpha = (a * 0.065f * 255f).toInt().coerceIn(0, 255)
+        canvas.drawLine(cx - maxR, cy, cx + maxR, cy, p)
+        canvas.drawLine(cx, cy - maxR, cx, cy + maxR, p)
+
+        // the beam: soft glow, inner glow, white-hot core
+        val bx = cx + kotlin.math.cos(ang.toDouble()).toFloat() * maxR
+        val by = cy + kotlin.math.sin(ang.toDouble()).toFloat() * maxR
+        p.strokeCap = Paint.Cap.ROUND
+        p.color = Theme.ACCENT_A
+        p.strokeWidth = 8f * px1; p.alpha = (a * 0.16f * 255f).toInt().coerceIn(0, 255)
+        canvas.drawLine(cx, cy, bx, by, p)
+        p.strokeWidth = 4f * px1; p.alpha = (a * 0.35f * 255f).toInt().coerceIn(0, 255)
+        canvas.drawLine(cx, cy, bx, by, p)
+        p.color = CORE
+        p.strokeWidth = 2f * px1; p.alpha = (a * 0.94f * 255f).toInt().coerceIn(0, 255)
+        canvas.drawLine(cx, cy, bx, by, p)
+        p.strokeCap = Paint.Cap.BUTT
+
+        // detections: light up as the beam passes, emit a ping ring, then fade like phosphor
+        var bi = 0
+        while (bi < radarBlips.size) {
+            val nd = radarBlips[bi] * 0.85f
+            val ba = radarBlips[bi + 1]
+            bi += 2
+            val behind = (((ang - ba) % twoPi) + twoPi) % twoPi   // 0 right after the beam passes
+            val bright = exp(-behind.toDouble() * 1.6).toFloat()
+            if (bright > 0.03f) {
+                val r = maxR * nd
+                val qx = cx + kotlin.math.cos(ba.toDouble()).toFloat() * r
+                val qy = cy + kotlin.math.sin(ba.toDouble()).toFloat() * r
+                val dot = 3.3f * px1
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 2f * px1
+                p.color = Theme.ACCENT_A
+                p.alpha = (a * bright * 0.55f * 255f).toInt().coerceIn(0, 255)
+                canvas.drawCircle(qx, qy, dot * (2f + 9f * (1f - bright)), p)   // expanding ping
+                p.style = Paint.Style.FILL
+                p.alpha = (a * bright * 0.25f * 255f).toInt().coerceIn(0, 255)
+                canvas.drawCircle(qx, qy, dot * 3f, p)
+                p.color = CORE
+                p.alpha = (a * bright * 255f).toInt().coerceIn(0, 255)
+                canvas.drawCircle(qx, qy, dot, p)
+            }
+        }
+
+        // center hub
+        p.style = Paint.Style.FILL
+        p.color = Theme.ACCENT_A
+        p.alpha = (a * (0.24f + 0.12f * pulse) * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, 6f * px1 * (1f + 0.2f * pulse), p)
+        p.color = CORE
+        p.alpha = (a * 245f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, 2.4f * px1, p)
+        canvas.restore()
+    }
+
+    /**
+     * A barely-there marker over codes found while the animation finishes: a faint tint and a thin,
+     * softly pulsing outline. The scan effect stays fully visible through it.
+     */
+    private fun drawPending(canvas: Canvas) {
+        val hr = 16f * dp
+        val a = pendingAlpha
+        fillPaint.shader = null
+        glowPaint.shader = null
+        for (r in pendingRects) {
+            mapRect(paddedHole(r), holeView)
+            fillPaint.color = withAlpha(Theme.ACCENT_A, a * (0.04f + 0.03f * pulse))
+            canvas.drawRoundRect(holeView, hr, hr, fillPaint)
+            glowPaint.color = Theme.ACCENT_A
+            glowPaint.strokeWidth = 8f * dp
+            glowPaint.alpha = (a * (0.04f + 0.05f * pulse) * 255).toInt()
+            canvas.drawRoundRect(holeView, hr, hr, glowPaint)
+            glowPaint.strokeWidth = 1.2f * dp
+            glowPaint.alpha = (a * (0.28f + 0.22f * pulse) * 255).toInt()
+            canvas.drawRoundRect(holeView, hr, hr, glowPaint)
+        }
     }
 
     private val CORE = Color.rgb(0xEA, 0xFB, 0xFF)
@@ -743,6 +942,9 @@ class ScanView(context: Context) : View(context) {
     @Suppress("unused")
     private val linear = LinearInterpolator()
 }
+
+private const val SWEEP_MS = 1150L
+private const val SWEEP_DELAY = 60L
 
 object Motion {
     val STANDARD: TimeInterpolator = PathInterpolator(0.2f, 0f, 0f, 1f)

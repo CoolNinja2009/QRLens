@@ -20,18 +20,23 @@ Android 11+ · works offline · no internet permission · free and open source
 
 <table>
 <tr>
-<td align="center" width="33%">
-<img src="docs/classic.gif" width="220"><br>
+<td align="center" width="25%">
+<img src="docs/classic.gif" width="200"><br>
 <b>Classic sweep</b><br>
 <sub>A scan line sweeps the frozen screen</sub>
 </td>
-<td align="center" width="33%">
-<img src="docs/ripple.gif" width="220"><br>
+<td align="center" width="25%">
+<img src="docs/ripple.gif" width="200"><br>
 <b>Ripple</b><br>
-<sub>A 3D particle water-wave from the centre</sub>
+<sub>A stone-drop wave of glowing particles — the first wave rises highest</sub>
 </td>
-<td align="center" width="33%">
-<img src="docs/flag.gif" width="220"><br>
+<td align="center" width="25%">
+<img src="docs/radar.gif" width="200"><br>
+<b>Radar</b><br>
+<sub>A sonar beam sweeps the screen, pinging as it searches</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/flag.gif" width="200"><br>
 <b>Link safety warnings</b><br>
 <sub>Risky links & payments are flagged before you open them</sub>
 </td>
@@ -70,7 +75,7 @@ Someone sends you a QR code on WhatsApp. A payment QR is on a website. A Wi‑Fi
 - **Link safety warnings (offline).** Flags look-alike domains, @-tricks, raw IPs, insecure login pages, shortened links and brand-impersonation, and always cautions on payment (UPI) codes. Risky codes need a second tap to open. All checks run on-device.
 - **Scan history.** Every code you scan is saved on-device (last 100). Reopen, copy or share any of them, or clear the list. Never leaves your phone.
 - **Generate QR codes.** Make a QR from any text or link, then share or save it. Share text to QR Lens to turn it into a code.
-- **Make it yours.** Choose your scan animation (classic sweep or ripple), a trigger chime or silence, and toggle the link warnings — all in Settings.
+- **Make it yours.** Choose your scan animation (classic sweep, ripple or radar), a trigger chime or silence, and toggle the link warnings — all in Settings.
 - **Private by design.** Everything happens on your phone. QR Lens has no internet permission, so nothing it sees can leave your device.
 
 ## Install

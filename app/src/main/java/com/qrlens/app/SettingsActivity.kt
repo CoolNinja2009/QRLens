@@ -23,9 +23,16 @@ class SettingsActivity : Activity() {
         col.addView(Ui.text(this, "Settings", 26f, Color.WHITE, bold = true))
 
         col.addView(shortcutCard(), Ui.cardLp(this, 18))
-        col.addView(choiceCard("Animation", "The scan effect when you trigger QR Lens.",
-            listOf("classic" to "Classic sweep", "ripple" to "Ripple from center"),
-            Prefs.animation(this)) { Prefs.setAnimation(this, it) }, Ui.cardLp(this, 14))
+        val animCard = choiceCard("Animation", "The scan effect when you trigger QR Lens.",
+            listOf("classic" to "Classic sweep", "ripple" to "Ripple from center", "radar" to "Radar sweep"),
+            Prefs.animation(this)) { Prefs.setAnimation(this, it) }
+        animCard.addView(Ui.switch(this, "Shortened animation", Prefs.shortAnim(this)) {
+            Prefs.setShortAnim(this, it)
+        }.apply { setPadding(0, (10 * d).toInt(), 0, 0) })
+        animCard.addView(Ui.text(this,
+            "Off: the scan effect plays through once, with found codes faintly outlined until it ends. Tap anywhere to skip ahead. On: jump to the code the moment it's found.",
+            13f, Theme.TEXT_2).apply { setPadding(0, (2 * d).toInt(), 0, 0) })
+        col.addView(animCard, Ui.cardLp(this, 14))
         col.addView(choiceCard("Sound", "A soft chime when a scan starts.",
             listOf("default" to "Default chime", "none" to "No sound"),
             Prefs.sound(this)) { Prefs.setSound(this, it) }, Ui.cardLp(this, 14))
@@ -44,6 +51,7 @@ class SettingsActivity : Activity() {
         val current = Prefs.triggerId(this)
         for ((i, t) in Trigger.values().withIndex()) {
             group.addView(RadioButton(this).apply {
+                typeface = Fonts.regular(this@SettingsActivity)
                 id = 2000 + i
                 text = t.title
                 textSize = 15f
@@ -74,6 +82,7 @@ class SettingsActivity : Activity() {
         val group = RadioGroup(this)
         options.forEachIndexed { i, (value, label) ->
             group.addView(RadioButton(this).apply {
+                typeface = Fonts.regular(this@SettingsActivity)
                 id = 3000 + i
                 text = label
                 textSize = 15f

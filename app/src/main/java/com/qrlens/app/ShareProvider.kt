@@ -19,10 +19,12 @@ class ShareProvider : ContentProvider() {
     private fun fileFor(uri: Uri): File {
         val ctx = context ?: throw FileNotFoundException()
         val name = uri.lastPathSegment ?: throw FileNotFoundException()
-        val dir = File(ctx.cacheDir, DIR).canonicalFile
-        val f = File(dir, name).canonicalFile
-        if (f.parentFile != dir || !f.exists()) throw FileNotFoundException(uri.toString())
-        return f
+        // Served dirs: generated files (cache/shared) and retained source crops (files/sources).
+        for (dir in arrayOf(File(ctx.cacheDir, DIR).canonicalFile, File(ctx.filesDir, SOURCES).canonicalFile)) {
+            val f = File(dir, name).canonicalFile
+            if (f.parentFile == dir && f.exists()) return f
+        }
+        throw FileNotFoundException(uri.toString())
     }
 
     override fun query(
@@ -59,7 +61,8 @@ class ShareProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     companion object {
-        const val DIR = "shared"
+        const val DIR = "shared"          // generated / transient files, under cacheDir
+        const val SOURCES = "sources"     // retained source-image crops, under filesDir
         fun uriFor(ctx: Context, f: File): Uri =
             Uri.parse("content://${ctx.packageName}.files/${Uri.encode(f.name)}")
     }

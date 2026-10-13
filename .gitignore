@@ -16,6 +16,3 @@ local.properties
 *.jks
 *.p12
 *.b64.txt
-
-*.zip
-s

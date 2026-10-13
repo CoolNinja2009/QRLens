@@ -3,6 +3,8 @@ package com.qrlens.app
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
+import java.io.File
+import java.io.FileOutputStream
 import android.annotation.SuppressLint
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.LayerDrawable
@@ -53,6 +55,11 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
     private var pill: View? = null
     private var topPill: View? = null
     private var picking = false
+    /** Full-animation mode: codes are found and faintly marked while the scan effect finishes. */
+    private var holding = false
+    private var delivered = false
+    private var skipRequested = false
+    private var fullAnim = true
     private var session = 0
     private var found: List<Found> = emptyList()
     private var index = 0
@@ -74,6 +81,10 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         closing = false
         ready = false
         picking = false
+        holding = false
+        delivered = false
+        skipRequested = false
+        fullAnim = !Prefs.shortAnim(ctx)
         found = emptyList()
         index = 0
 
@@ -114,17 +125,59 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         val t0 = SystemClock.uptimeMillis()
         Thread {
             val hits = try { QrDetector.detect(bmp) } catch (t: Throwable) { emptyList() }
+            // Record to history here (off the UI thread), saving a cropped source image per code.
+            for (h in hits) {
+                try {
+                    val src = cropSource(bmp, h.rect)
+                    HistoryStore.add(ctx, QrParser.parse(h.text), src)
+                } catch (_: Throwable) {
+                }
+            }
             main.post { deliver(id, t0, hits) }
         }.apply { name = "qr-detect"; priority = Thread.MAX_PRIORITY }.start()
     }
 
+    /** Crops the QR region (with margin) from the screenshot and keeps it as the scan's source image. */
+    private fun cropSource(bmp: Bitmap, rect: RectF): String? {
+        val pad = max(rect.width(), rect.height()) * 0.12f + 12f
+        var l = (rect.left - pad).toInt().coerceIn(0, bmp.width - 1)
+        var t = (rect.top - pad).toInt().coerceIn(0, bmp.height - 1)
+        var r = (rect.right + pad).toInt().coerceIn(l + 1, bmp.width)
+        var b = (rect.bottom + pad).toInt().coerceIn(t + 1, bmp.height)
+        if (r - l < 8 || b - t < 8) return null
+        var crop = Bitmap.createBitmap(bmp, l, t, r - l, b - t)
+        // Cap the stored size so it stays small on disk.
+        val maxSide = 720
+        val side = max(crop.width, crop.height)
+        if (side > maxSide) {
+            val s = maxSide.toFloat() / side
+            crop = Bitmap.createScaledBitmap(crop, (crop.width * s).toInt(), (crop.height * s).toInt(), true)
+        }
+        val dir = File(ctx.filesDir, ShareProvider.SOURCES).apply { mkdirs() }
+        val name = "src_${System.currentTimeMillis()}_${(rect.left.toInt())}.png"
+        FileOutputStream(File(dir, name)).use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        return name
+    }
+
     private fun deliver(id: Int, t0: Long, hits: List<QrDetector.Hit>) {
         if (id != session || root == null) return
+        delivered = true
         val items = hits.map { Found(it.rect, QrParser.parse(it.text)) }
             .sortedByDescending { it.rect.width() * it.rect.height() }
-        for (f in items) try { HistoryStore.add(ctx, f.content) } catch (_: Throwable) {}
+        if (fullAnim && items.isNotEmpty() && !closing) {
+            found = items
+            if (skipRequested) { proceed(); return }
+            // Let the scan effect play through; meanwhile faintly mark where the codes are.
+            holding = true
+            scan?.markFound(items.map { it.rect })
+            svc.haptic(VibrationEffect.EFFECT_TICK)
+            main.postDelayed({
+                if (id == session && holding && !closing && root != null) proceed()
+            }, scan?.msToFinishCycle() ?: 0L)
+            return
+        }
         // Let the scan animation breathe for a moment so the transition never feels abrupt.
-        val wait = max(0L, MIN_SCAN_MS - (SystemClock.uptimeMillis() - t0))
+        val wait = if (skipRequested) 0L else max(0L, MIN_SCAN_MS - (SystemClock.uptimeMillis() - t0))
         main.postDelayed({
             if (id != session || root == null || closing) return@postDelayed
             found = items
@@ -134,6 +187,13 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
                 else -> overview()
             }
         }, wait)
+    }
+
+    /** End the hold (animation finished, or the user tapped to skip) and zoom to the code(s). */
+    private fun proceed() {
+        holding = false
+        if (closing || root == null || found.isEmpty()) return
+        if (found.size == 1) focus(0, first = true) else overview()
     }
 
     fun dismiss(fast: Boolean = false, after: (() -> Unit)? = null) {
@@ -146,6 +206,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
         closingSince = SystemClock.uptimeMillis()
         ready = false
         picking = false
+        holding = false
         autoAnim?.cancel()
         hideFloating(if (fast) 90 else 160)
         val mySession = session
@@ -278,7 +339,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             text = msg
             setTextColor(Theme.TEXT)
             textSize = 14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = Fonts.medium(ctx)
             setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
             background = glass(100f * dp)
         }
@@ -327,7 +388,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             text = "No QR code on screen"
             setTextColor(Theme.TEXT)
             textSize = 15f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = Fonts.medium(ctx)
             setPadding((20 * dp).toInt(), (12 * dp).toInt(), (20 * dp).toInt(), (12 * dp).toInt())
             background = glass(100f * dp)
         }
@@ -346,6 +407,11 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
 
     override fun onBackgroundTap() {
         if (closing) return
+        if (fullAnim) {
+            // A tap while the animation plays jumps straight to the code.
+            if (holding) { proceed(); return }
+            if (!delivered) { skipRequested = true; return }
+        }
         if (picking || ready || found.isEmpty()) back()
     }
 
@@ -409,13 +475,13 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             setTextColor(Theme.ACCENT_A)
             textSize = 11f
             letterSpacing = 0.12f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = Fonts.bold(ctx)
         }
         val title = TextView(ctx).apply {
             text = c.title
             setTextColor(Theme.TEXT)
             textSize = 18f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = Fonts.medium(ctx)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             setPadding(0, (3 * dp).toInt(), 0, (2 * dp).toInt())
@@ -531,7 +597,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             text = if (danger) "⚠" else "⚡"   // warning / caution glyph
             setTextColor(color)
             textSize = 13f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = Fonts.bold(ctx)
         }
         val msg = TextView(ctx).apply {
             text = safety.top ?: if (danger) "This looks risky." else "Be careful."
@@ -653,7 +719,7 @@ class OverlayController(private val svc: QrLensService) : ScanView.Listener {
             this.text = text
             setTextColor(if (primary) 0xFF0B0C14.toInt() else Theme.TEXT)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, if (primary) 15f else 14f)
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = Fonts.bold(ctx)
             gravity = Gravity.CENTER
             val h = ((if (primary) 22 else 18) * dp).toInt()
             val v = ((if (primary) 12 else 11) * dp).toInt()

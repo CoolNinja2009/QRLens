@@ -241,7 +241,7 @@ object Prefs {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_HOLD_BACK, value).apply()
     }
 
-    private const val KEY_ANIM = "animation"      // "classic" | "ripple"
+    private const val KEY_ANIM = "animation"      // "classic" | "ripple" | "radar"
     private const val KEY_SOUND = "sound"         // "default" | "none"
     private const val KEY_FLAGGING = "flagging"   // link/payment safety warnings on/off
 
@@ -257,6 +257,12 @@ object Prefs {
     fun flagging(ctx: Context): Boolean = p(ctx).getBoolean(KEY_FLAGGING, true)
 
     fun setFlagging(ctx: Context, value: Boolean) = p(ctx).edit().putBoolean(KEY_FLAGGING, value).apply()
+
+    private const val KEY_SHORT_ANIM = "short_anim" // true: jump to the code as soon as it's found
+
+    fun shortAnim(ctx: Context): Boolean = p(ctx).getBoolean(KEY_SHORT_ANIM, false)
+
+    fun setShortAnim(ctx: Context, value: Boolean) = p(ctx).edit().putBoolean(KEY_SHORT_ANIM, value).apply()
 
     private fun p(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 }
